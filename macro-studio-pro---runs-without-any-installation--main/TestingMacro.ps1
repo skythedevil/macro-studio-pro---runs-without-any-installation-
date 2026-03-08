@@ -859,6 +859,7 @@ function Start-Playback {
                 $lblHUD.Text = $hudText; $lblHUD.Refresh()
                 $HUDLabel.Text = $hudText; $FloatingHUD.Refresh()
                 $StatusLabel.Text = "Step ${stepCount}: $($step.ActionType) in $($step.WindowTitle)"
+                $stepCount++
             }
             
             # --- Smart Window Wait ---
@@ -973,7 +974,6 @@ function Start-Playback {
                 Start-Sleep -Milliseconds 15
                 $waited += 15
             }
-            $stepCount++
         }
         if (-not $stopMacro) { Show-Notification "Loop $($i+1) Completed" }
     }
