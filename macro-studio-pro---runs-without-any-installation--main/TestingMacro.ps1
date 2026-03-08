@@ -852,13 +852,14 @@ function Start-Playback {
         foreach ($step in $Global:MacroSteps) {
             if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { $stopMacro = $true; break }
             
-            $hudText = "ACTION ($stepCount): $($step.ActionType)"
-            if ($step.ActionType -eq "Type") { $hudText = "TYPE: '$($step.TextToType)'" }
-            if ($step.WindowTitle) { $hudText += " in $($step.WindowTitle)" }
-            $lblHUD.Text = $hudText; $lblHUD.Refresh()
-            $HUDLabel.Text = $hudText; $FloatingHUD.Refresh()
-            
-            $StatusLabel.Text = "Step ${stepCount}: $($step.ActionType) in $($step.WindowTitle)"
+            if ($step.ActionType -ne "Move") {
+                $hudText = "ACTION ($stepCount): $($step.ActionType)"
+                if ($step.ActionType -eq "Type") { $hudText = "TYPE: '$($step.TextToType)'" }
+                if ($step.WindowTitle) { $hudText += " in $($step.WindowTitle)" }
+                $lblHUD.Text = $hudText; $lblHUD.Refresh()
+                $HUDLabel.Text = $hudText; $FloatingHUD.Refresh()
+                $StatusLabel.Text = "Step ${stepCount}: $($step.ActionType) in $($step.WindowTitle)"
+            }
             
             # --- Smart Window Wait ---
             if (-not [string]::IsNullOrEmpty($step.WindowTitle)) {
@@ -883,6 +884,8 @@ function Start-Playback {
                     $waitedForWin += 150
                 }
                 if ($stopMacro) { break }
+                # App-Readiness Settling Delay
+                Start-Sleep -Milliseconds 500 
             }
 
             if ($step.ActionType -eq "Click") {
@@ -945,7 +948,11 @@ function Start-Playback {
             }
             
             $finalWait = ([int]($step.WaitTimeMS / $speed)) + $extraDelay
-            if ($finalWait -lt 50) { $finalWait = 50 }
+            if ($step.ActionType -eq "Move") {
+                if ($finalWait -lt 1) { $finalWait = 1 }
+            } else {
+                if ($finalWait -lt 15) { $finalWait = 15 }
+            }
             
             $waited = 0
             while ($waited -lt $finalWait) {
@@ -963,8 +970,8 @@ function Start-Playback {
                     $StatusLabel.Text = "Playing Loop $($i + 1)..."
                     while ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x78) -band 0x8000) { Start-Sleep -Milliseconds 10 }
                 }
-                Start-Sleep -Milliseconds 100
-                $waited += 100
+                Start-Sleep -Milliseconds 15
+                $waited += 15
             }
             $stepCount++
         }
