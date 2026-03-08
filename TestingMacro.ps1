@@ -27,8 +27,9 @@ try {
     Add-Type -AssemblyName System.Drawing
     Add-Type -AssemblyName Microsoft.VisualBasic
 
-# --- Native Methods (Hardened for AV Compatibility) ---
-$NativeMethodsCode = @"
+# --- Native Methods (Robust Definition) ---
+if (-not ("TestingMacroStudioProWin32" -as [type])) {
+    $NativeMethodsCode = @'
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -71,8 +72,9 @@ public class TestingMacroStudioProWin32 {
     public const int WS_EX_LAYERED = 0x80000;
     public const int WS_EX_TRANSPARENT = 0x20;
 }
-"@
-Add-Type -TypeDefinition $NativeMethodsCode
+'@
+    Add-Type -TypeDefinition $NativeMethodsCode
+}
 
 # --- GUI Construction ---
 $Form = New-Object Windows.Forms.Form
