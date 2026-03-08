@@ -130,8 +130,8 @@ $FloatingHUD.Location = New-Object Drawing.Point($HUDPosX, $HUDPosY)
 # Make HUD Click-Through
 $FloatingHUD.Add_Load({
     $hWnd = $FloatingHUD.Handle
-    $exStyle = [TestingMacroStudioProWin32]::GetWindowLong($hWnd, -20)
-    [TestingMacroStudioProWin32]::SetWindowLong($hWnd, -20, $exStyle -bor 0x80000 -bor 0x20) | Out-Null
+    $exStyle = [StudioProWin32]::GetWindowLong($hWnd, -20)
+    [StudioProWin32]::SetWindowLong($hWnd, -20, $exStyle -bor 0x80000 -bor 0x20) | Out-Null
 })
 
 # Pre-initialize colors to avoid null during control creation
@@ -508,10 +508,10 @@ function Show-Notification($msg) {
 }
 
 function Get-ActiveWindowTitle() {
-    $hWnd = [TestingMacroStudioProWin32]::GetForegroundWindow()
+    $hWnd = [StudioProWin32]::GetForegroundWindow()
     if ($hWnd -eq [IntPtr]::Zero) { return "" }
     $sb = New-Object System.Text.StringBuilder(512)
-    [TestingMacroStudioProWin32]::GetWindowText($hWnd, $sb, $sb.Capacity) | Out-Null
+    [StudioProWin32]::GetWindowText($hWnd, $sb, $sb.Capacity) | Out-Null
     return $sb.ToString().Trim()
 }
 
@@ -671,12 +671,12 @@ function Start-Recording {
     }
     for($vk=0x30;$vk -le 0x5A;$vk++) { $keyMap[$vk] = [char]$vk }
 
-    while ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { Start-Sleep -Milliseconds 10 }
+    while ([StudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { Start-Sleep -Milliseconds 10 }
 
     $isPaused = $false
     while ($true) {
-        if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { break }
-        if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x78) -band 0x8000) {
+        if ([StudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { break }
+        if ([StudioProWin32]::GetAsyncKeyState(0x78) -band 0x8000) {
             $isPaused = -not $isPaused
             if ($isPaused) {
                 Show-Notification "RECORDING PAUSED"
@@ -686,7 +686,7 @@ function Start-Recording {
                 $StatusLabel.Text = "RECORDING..."
                 $lastTime = Get-Date
             }
-            while ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x78) -band 0x8000) { Start-Sleep -Milliseconds 10 }
+            while ([StudioProWin32]::GetAsyncKeyState(0x78) -band 0x8000) { Start-Sleep -Milliseconds 10 }
         }
         if ($isPaused) { Start-Sleep -Milliseconds 100; continue }
 
@@ -697,7 +697,7 @@ function Start-Recording {
         $isAnyKeyDown = $false
         foreach($vk in $keyMap.Keys) {
             if ($vk -eq 0x01) { continue } # Handle Mouse Separately
-            $isDown = [TestingMacroStudioProWin32]::GetAsyncKeyState($vk) -band 0x8000
+            $isDown = [StudioProWin32]::GetAsyncKeyState($vk) -band 0x8000
             if ($isDown -and -not $keyDown[$vk]) {
                 $isAnyKeyDown = $true
                 $keyName = $keyMap[$vk]
@@ -728,9 +728,9 @@ function Start-Recording {
                     }
                     
                     $modifierPrefix = ""
-                    if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x11) -band 0x8000) { $modifierPrefix += "^" }
-                    if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x12) -band 0x8000) { $modifierPrefix += "%" }
-                    if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x10) -band 0x8000) { $modifierPrefix += "+" }
+                    if ([StudioProWin32]::GetAsyncKeyState(0x11) -band 0x8000) { $modifierPrefix += "^" }
+                    if ([StudioProWin32]::GetAsyncKeyState(0x12) -band 0x8000) { $modifierPrefix += "%" }
+                    if ([StudioProWin32]::GetAsyncKeyState(0x10) -band 0x8000) { $modifierPrefix += "+" }
                     
                     $finalKey = $modifierPrefix + $sendKey
                     Add-MacroStep "Type" 0 0 $finalKey $delta "" (Get-ActiveWindowTitle)
@@ -764,7 +764,7 @@ function Start-Recording {
         }
 
         # 2. Left Button (MouseDown / MouseUp / DoubleClick / Drag)
-        $isLeftDown = [TestingMacroStudioProWin32]::GetAsyncKeyState(0x01) -band 0x8000
+        $isLeftDown = [StudioProWin32]::GetAsyncKeyState(0x01) -band 0x8000
         if ($isLeftDown -and -not $leftDown) {
             # Mouse DOWN detected
             if ($Global:TypeBuffer -ne "") {
@@ -804,7 +804,7 @@ function Start-Recording {
         $leftDown = $isLeftDown
 
         # 3. Right Click (Keep as unified for now unless requested differently)
-        $isRightDown = [TestingMacroStudioProWin32]::GetAsyncKeyState(0x02) -band 0x8000
+        $isRightDown = [StudioProWin32]::GetAsyncKeyState(0x02) -band 0x8000
         if ($isRightDown -and -not $rightDown) {
             $bmp = Get-ScreenSnippet $pos.X $pos.Y; $img = Image-ToBase64 $bmp; if($bmp){$bmp.Dispose()}
             Add-MacroStep "RightClick" $pos.X $pos.Y "" $delta $img (Get-ActiveWindowTitle)
@@ -850,7 +850,7 @@ function Start-Playback {
         
         $stepCount = 1
         foreach ($step in $Global:MacroSteps) {
-            if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { $stopMacro = $true; break }
+            if ([StudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { $stopMacro = $true; break }
             
             if ($step.ActionType -ne "Move") {
                 $hudText = "ACTION ($stepCount): $($step.ActionType)"
@@ -874,13 +874,13 @@ function Start-Playback {
                     # Robust check: Exact match OR partial match for common parts
                     if ($currentWin -eq $targetWin -or $currentWin -match [regex]::Escape($matchPattern)) { 
                         # Force foreground strictly as requested
-                        $hWnd = [TestingMacroStudioProWin32]::GetForegroundWindow()
-                        [TestingMacroStudioProWin32]::SetForegroundWindow($hWnd) | Out-Null
+                        $hWnd = [StudioProWin32]::GetForegroundWindow()
+                        [StudioProWin32]::SetForegroundWindow($hWnd) | Out-Null
                         break 
                     }
                     
                     $StatusLabel.Text = "WAITING FOR: $targetWin ($waitedForWin ms)"
-                    if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { $stopMacro = $true; break }
+                    if ([StudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { $stopMacro = $true; break }
                     Start-Sleep -Milliseconds 150
                     $waitedForWin += 150
                 }
@@ -903,49 +903,49 @@ function Start-Playback {
                         $anchor.Dispose(); $searchArea.Dispose()
                     }
                 }
-                [TestingMacroStudioProWin32]::SetCursorPos($targetX, $targetY)
+                [StudioProWin32]::SetCursorPos($targetX, $targetY)
                 Start-Sleep -Milliseconds 150
-                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                [StudioProWin32]::mouse_event([StudioProWin32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                [StudioProWin32]::mouse_event([StudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             }
             elseif ($step.ActionType -eq "MouseDown") {
-                [TestingMacroStudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
+                [StudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
                 Start-Sleep -Milliseconds 100
-                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                [StudioProWin32]::mouse_event([StudioProWin32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
             }
             elseif ($step.ActionType -eq "MouseUp") {
-                [TestingMacroStudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
+                [StudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
                 Start-Sleep -Milliseconds 100
-                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                [StudioProWin32]::mouse_event([StudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             }
             elseif ($step.ActionType -eq "RightClick") {
-                [TestingMacroStudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
+                [StudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
                 Start-Sleep -Milliseconds 100
-                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
-                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+                [StudioProWin32]::mouse_event([StudioProWin32]::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+                [StudioProWin32]::mouse_event([StudioProWin32]::MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
             }
             elseif ($step.ActionType -eq "DoubleClick") {
-                [TestingMacroStudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
+                [StudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
                 Start-Sleep -Milliseconds 100
-                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                [StudioProWin32]::mouse_event([StudioProWin32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                [StudioProWin32]::mouse_event([StudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
                 Start-Sleep -Milliseconds 50
-                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                [StudioProWin32]::mouse_event([StudioProWin32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                [StudioProWin32]::mouse_event([StudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             }
             elseif ($step.ActionType -eq "Move") {
-                [TestingMacroStudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
+                [StudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
             }
             elseif ($step.ActionType -eq "Type") {
                 # Excel Fix: Ensure fresh modifier state for navigation keys
                 if ($step.TextToType -match "{(LEFT|RIGHT|UP|DOWN)}") {
-                    [TestingMacroStudioProWin32]::keybd_event(0x11, 0, 0x0002, 0) # Ctrl Up
-                    [TestingMacroStudioProWin32]::keybd_event(0x10, 0, 0x0002, 0) # Shift Up
+                    [StudioProWin32]::keybd_event(0x11, 0, 0x0002, 0) # Ctrl Up
+                    [StudioProWin32]::keybd_event(0x10, 0, 0x0002, 0) # Shift Up
                 }
                 [System.Windows.Forms.SendKeys]::SendWait($step.TextToType)
             }
             elseif ($step.ActionType -eq "Scroll") {
-                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_WHEEL, 0, 0, [int]$step.TextToType, 0)
+                [StudioProWin32]::mouse_event([StudioProWin32]::MOUSEEVENTF_WHEEL, 0, 0, [int]$step.TextToType, 0)
             }
             
             $finalWait = ([int]($step.WaitTimeMS / $speed)) + $extraDelay
@@ -957,19 +957,19 @@ function Start-Playback {
             
             $waited = 0
             while ($waited -lt $finalWait) {
-                if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { $stopMacro = $true; break }
-                if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x78) -band 0x8000) {
+                if ([StudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { $stopMacro = $true; break }
+                if ([StudioProWin32]::GetAsyncKeyState(0x78) -band 0x8000) {
                     Show-Notification "MACRO PAUSED"
                     $StatusLabel.Text = "PLAYBACK PAUSED"
-                    while ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x78) -band 0x8000) { Start-Sleep -Milliseconds 10 }
-                    while (-not ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x78) -band 0x8000)) { 
-                        if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { $stopMacro = $true; break }
+                    while ([StudioProWin32]::GetAsyncKeyState(0x78) -band 0x8000) { Start-Sleep -Milliseconds 10 }
+                    while (-not ([StudioProWin32]::GetAsyncKeyState(0x78) -band 0x8000)) { 
+                        if ([StudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { $stopMacro = $true; break }
                         Start-Sleep -Milliseconds 100 
                     }
                     if ($stopMacro) { break }
                     Show-Notification "MACRO RESUMED"
                     $StatusLabel.Text = "Playing Loop $($i + 1)..."
-                    while ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x78) -band 0x8000) { Start-Sleep -Milliseconds 10 }
+                    while ([StudioProWin32]::GetAsyncKeyState(0x78) -band 0x8000) { Start-Sleep -Milliseconds 10 }
                 }
                 Start-Sleep -Milliseconds 15
                 $waited += 15
