@@ -1,5 +1,14 @@
 try {
-    Add-Type -AssemblyName System.Windows.Forms
+    # Relative log location
+    $Global:LogPath = Join-Path $PSScriptRoot "MacroStudio_Error.log"
+
+    # Robust Assembly Loading
+    $assemblies = @("System.Windows.Forms", "System.Drawing", "Microsoft.VisualBasic")
+    foreach ($asm in $assemblies) {
+        if (-not ([System.Reflection.Assembly]::GetAssemblies() | Where-Object { $_.FullName -like "$asm*" })) {
+            try { Add-Type -AssemblyName $asm } catch { }
+        }
+    }
 <#
 .SYNOPSIS
     Testing Macro Studio Pro - Advanced Productivity & Automation Suite
@@ -24,8 +33,6 @@ try {
     Security: This script contains standard UI automation methods. 
 #>
 
-    Add-Type -AssemblyName System.Drawing
-    Add-Type -AssemblyName Microsoft.VisualBasic
 
 # --- Native Methods (Robust Definition) ---
 if (-not ("TestingMacroStudioProWin32" -as [type])) {
@@ -1168,7 +1175,23 @@ Apply-Theme $Global:IsDarkMode
 [Windows.Forms.Application]::Run($Form)
 }
 catch {
-    $ErrorMsg = $_.Exception.Message + "`n" + $_.ScriptStackTrace
-    [System.Windows.Forms.MessageBox]::Show("Script Error: $ErrorMsg", "Error")
-    $ErrorMsg | Out-File "d:\doer\TestingMacro_error_log.txt"
+    $ErrorMsg = "`n[" + (Get-Date).ToString("yyyy-MM-dd HH:mm:ss") + "] SCRIPT ERROR:`n" + $_.Exception.Message + "`n" + $_.ScriptStackTrace + "`n" + ("=" * 50)
+    
+    # Try GUI error message
+    try {
+        if ([System.Type]::GetType("System.Windows.Forms.MessageBox")) {
+            [System.Windows.Forms.MessageBox]::Show("CRITICAL ERROR DURING STARTUP:`n`n$($_.Exception.Message)`n`nDetails logged to: $Global:LogPath", "Macro Studio Pro Failure")
+        }
+    } catch { }
+
+    # Write to local log file
+    try {
+        $ErrorMsg | Out-File $Global:LogPath -Append -Encoding UTF8
+    } catch {
+        # Fallback to temp directory if root folder is write-protected
+        $fallback = Join-Path $env:TEMP "MacroStudio_Error.log"
+        $ErrorMsg | Out-File $fallback -Append
+    }
+    
+    Write-Error $_.Exception.Message
 }
