@@ -575,10 +575,12 @@ function Refresh-StepList {
     # Prevent GUI flicker and hang during large list updates
     $ListSteps.BeginUpdate()
     $ListSteps.Items.Clear()
+    $count = 1
     foreach ($step in $Global:MacroSteps) {
         $appTag = if ($step.WindowTitle) { "[$($step.WindowTitle)] " } else { "" }
-        $displayText = if ($step.ActionType -eq "Click") { "${appTag}Click at ($($step.ScreenX), $($step.ScreenY)) - Waiting $($step.WaitTimeMS) ms" } elseif ($step.ActionType -eq "Scroll") { "${appTag}Scroll $($step.TextToType) - Waiting $($step.WaitTimeMS) ms" } else { "${appTag}Type '$($step.TextToType)' - Waiting $($step.WaitTimeMS) ms" }
+        $displayText = if ($step.ActionType -eq "Click") { "Step $count: ${appTag}Click at ($($step.ScreenX), $($step.ScreenY)) - Waiting $($step.WaitTimeMS) ms" } elseif ($step.ActionType -eq "Scroll") { "Step $count: ${appTag}Scroll $($step.TextToType) - Waiting $($step.WaitTimeMS) ms" } else { "Step $count: ${appTag}Type '$($step.TextToType)' - Waiting $($step.WaitTimeMS) ms" }
         $ListSteps.Items.Add($displayText) | Out-Null
+        $count++
     }
     $ListSteps.EndUpdate()
     
@@ -874,6 +876,15 @@ function Start-Playback {
         if (-not $stopMacro) { Show-Notification "Loop $($i+1) Completed" }
     }
     
+    if (-not $stopMacro) {
+        $HUDLabel.Text = "MACRO COMPLETED"
+        $FloatingHUD.BackColor = $Global:colorSuccess
+        $FloatingHUD.Refresh()
+        Start-Sleep -Seconds 1.5
+        $FloatingHUD.BackColor = [Drawing.Color]::FromArgb(40, 40, 40)
+    }
+    
+    $FloatingHUD.Hide()
     $Form.WindowState = "Normal"
     $StatusLabel.Text = if ($stopMacro) { "Macro Stopped" } else { "Playback Complete" }
 }
