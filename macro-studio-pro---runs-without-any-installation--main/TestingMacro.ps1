@@ -592,6 +592,8 @@ function Refresh-StepList {
             "Click"       { "Step ${count}: ${appTag}Click at ($($step.ScreenX), $($step.ScreenY))" }
             "RightClick"  { "Step ${count}: ${appTag}Right-Click at ($($step.ScreenX), $($step.ScreenY))" }
             "DoubleClick" { "Step ${count}: ${appTag}Double-Click at ($($step.ScreenX), $($step.ScreenY))" }
+            "MouseDown"   { "Step ${count}: ${appTag}Mouse Down at ($($step.ScreenX), $($step.ScreenY))" }
+            "MouseUp"     { "Step ${count}: ${appTag}Mouse Up at ($($step.ScreenX), $($step.ScreenY))" }
             "Scroll"      { "Step ${count}: ${appTag}Scroll $($step.TextToType)" }
             "Type"        { "Step ${count}: ${appTag}Type '$($step.TextToType)'" }
             Default       { "Step ${count}: ${appTag}Action: $($step.ActionType)" }
@@ -620,6 +622,8 @@ function Add-MacroStep($action, $x, $y, $text, $delay, $image = "", $winTitle = 
             "Click"       { "Move mouse to $x, $y and Left Click" }
             "RightClick"  { "Move mouse to $x, $y and Right Click" }
             "DoubleClick" { "Move mouse to $x, $y and Double Click" }
+            "MouseDown"   { "Press Mouse Down at $x, $y" }
+            "MouseUp"     { "Release Mouse at $x, $y" }
             "Move"        { "Move mouse to $x, $y" }
             "Type"        { "Type the message: '$text'" }
             "Scroll"      { "Scroll mouse wheel by $text units" }
@@ -759,9 +763,10 @@ function Start-Recording {
             $delta = 0 # Reset delta for immediately following action
         }
 
-        # 2. Left Click (with Double Click Logic)
+        # 2. Left Button (MouseDown / MouseUp / DoubleClick / Drag)
         $isLeftDown = [TestingMacroStudioProWin32]::GetAsyncKeyState(0x01) -band 0x8000
         if ($isLeftDown -and -not $leftDown) {
+            # Mouse DOWN detected
             if ($Global:TypeBuffer -ne "") {
                 $bmp_m = Get-ScreenSnippet $pos.X $pos.Y; $img_m = Image-ToBase64 $bmp_m; if($bmp_m){$bmp_m.Dispose()}
                 Add-MacroStep "Type" 0 0 $Global:TypeBuffer $Global:BufferTime $img_m $Global:BufferWin
@@ -772,28 +777,33 @@ function Start-Recording {
             $isDoubleClick = ($currentTimeMS - $lastClickTime -lt 400) -and ([Math]::Abs($pos.X - $lastClickPos.X) -lt 5) -and ([Math]::Abs($pos.Y - $lastClickPos.Y) -lt 5)
             
             if ($isDoubleClick -and $Global:MacroSteps.Count -gt 0) {
-                # Convert previous single click to double click
-                $prev = $Global:MacroSteps[$Global:MacroSteps.Count - 1]
-                if ($prev.ActionType -eq "Click") {
-                    $prev.ActionType = "DoubleClick"
-                    $prev.Instructions = "Move mouse to $($pos.X), $($pos.Y) and Double Click"
+                # Update previous MouseUp to DoubleClick? 
+                # Actually, for drag-and-drop, it's better to record discrete Down/Up.
+                # But for the user request "Double click as double click", let's replace the last Click if it just happened.
+                $lastStep = $Global:MacroSteps[$Global:MacroSteps.Count - 1]
+                if ($lastStep.ActionType -eq "MouseUp" -or $lastStep.ActionType -eq "Click") {
+                    $lastStep.ActionType = "DoubleClick"
+                    $lastStep.Instructions = "Double Click at $($pos.X), $($pos.Y)"
                     Refresh-StepList
                 } else {
-                    Add-MacroStep "DoubleClick" $pos.X $pos.Y "" $delta "" (Get-ActiveWindowTitle)
+                    Add-MacroStep "MouseDown" $pos.X $pos.Y "" $delta "" (Get-ActiveWindowTitle)
                 }
             } else {
-                $bmp = Get-ScreenSnippet $pos.X $pos.Y; $img = Image-ToBase64 $bmp; if($bmp){$bmp.Dispose()}
-                Add-MacroStep "Click" $pos.X $pos.Y "" $delta $img (Get-ActiveWindowTitle)
+                Add-MacroStep "MouseDown" $pos.X $pos.Y "" $delta "" (Get-ActiveWindowTitle)
             }
             
             $lastClickTime = $currentTimeMS
             $lastClickPos = $pos
             $lastTime = Get-Date
-            Show-Notification "CLICK DETECTED"
+        }
+        elseif (-not $isLeftDown -and $leftDown) {
+            # Mouse UP detected
+            Add-MacroStep "MouseUp" $pos.X $pos.Y "" $delta "" (Get-ActiveWindowTitle)
+            $lastTime = Get-Date
         }
         $leftDown = $isLeftDown
 
-        # 3. Right Click
+        # 3. Right Click (Keep as unified for now unless requested differently)
         $isRightDown = [TestingMacroStudioProWin32]::GetAsyncKeyState(0x02) -band 0x8000
         if ($isRightDown -and -not $rightDown) {
             $bmp = Get-ScreenSnippet $pos.X $pos.Y; $img = Image-ToBase64 $bmp; if($bmp){$bmp.Dispose()}
@@ -892,6 +902,16 @@ function Start-Playback {
                 [TestingMacroStudioProWin32]::SetCursorPos($targetX, $targetY)
                 Start-Sleep -Milliseconds 150
                 [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            }
+            elseif ($step.ActionType -eq "MouseDown") {
+                [TestingMacroStudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
+                Start-Sleep -Milliseconds 100
+                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            }
+            elseif ($step.ActionType -eq "MouseUp") {
+                [TestingMacroStudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
+                Start-Sleep -Milliseconds 100
                 [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             }
             elseif ($step.ActionType -eq "RightClick") {
