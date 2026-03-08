@@ -1,3 +1,5 @@
+try {
+    Add-Type -AssemblyName System.Windows.Forms
 <#
 .SYNOPSIS
     Testing Macro Studio Pro - Advanced Productivity & Automation Suite
@@ -72,8 +74,9 @@ $Font = New-Object Drawing.Font("Segoe UI", 10)
 $BoldFont = New-Object Drawing.Font("Segoe UI", 10, [Drawing.FontStyle]::Bold)
 $Form.Font = $Font
 
-# --- Theme Engine ---
+# --- Global Application State ---
 $Global:IsDarkMode = $true
+$Global:MacroSteps = New-Object System.Collections.Generic.List[Object]
 
 # Pre-initialize colors to avoid null during control creation
 $Global:colorBG = [Drawing.Color]::FromArgb(30,30,30)
@@ -405,25 +408,6 @@ $Form.Controls.Add($StatusStrip)
 # Final Theme Application
 Apply-Theme $Global:IsDarkMode
 
-$ListSteps.Add_SelectedIndexChanged({
-    $idx = $ListSteps.SelectedIndex
-    if ($idx -ge 0 -and $idx -lt $MacroSteps.Count) {
-        $step = $MacroSteps[$idx]
-        if (-not [string]::IsNullOrEmpty($step.AnchorImage)) {
-            $bmp = Base64-ToImage $step.AnchorImage
-            $oldImg = $PicPreview.Image
-            $PicPreview.Image = $bmp
-            if ($oldImg) { $oldImg.Dispose() }
-        } else {
-            $PicPreview.Image = $null
-        }
-        $PicPreview.Refresh()
-    }
-})
-
-# --- Logic Backend ---
-$MacroSteps = New-Object System.Collections.Generic.List[Object]
-
 function Show-Notification($msg) {
     if (-not $ChkShowNotify.Checked) { return }
     if ($null -eq $msg -or $msg -eq "") { return }
@@ -469,7 +453,10 @@ function Get-ScreenSnippet($x, $y, $w, $h) {
     try {
         $bmp = New-Object Drawing.Bitmap($w, $h)
         $graphics = [Drawing.Graphics]::FromImage($bmp)
-        $graphics.CopyFromScreen($x - [int]($w/2), $y - [int]($h/2), 0, 0, $bmp.Size)
+        # Handle screen edges to prevent out-of-bounds exceptions
+        $srcX = [Math]::Max(0, $x - [int]($w/2))
+        $srcY = [Math]::Max(0, $y - [int]($h/2))
+        $graphics.CopyFromScreen($srcX, $srcY, 0, 0, $bmp.Size)
         $graphics.Dispose()
         return $bmp
     } catch { return $null }
@@ -490,8 +477,11 @@ function Base64-ToImage($base64) {
         $bytes = [Convert]::FromBase64String($base64)
         $ms = New-Object System.IO.MemoryStream($bytes)
         $img = [Drawing.Image]::FromStream($ms)
-        # Clone it to a new bitmap so we can dispose the stream immediately
-        $bmp = New-Object Drawing.Bitmap($img)
+        # Deep clone pixels to a new bitmap to avoid stream dependency and disposal bugs
+        $bmp = New-Object Drawing.Bitmap($img.Width, $img.Height)
+        $g = [Drawing.Graphics]::FromImage($bmp)
+        $g.DrawImage($img, 0, 0)
+        $g.Dispose()
         $img.Dispose()
         $ms.Dispose()
         return $bmp
@@ -521,24 +511,25 @@ function Find-ImageSnippet($largeBmp, $smallBmp) {
     return $null
 }
 
-# --- Logic Backend ---
-$MacroSteps = New-Object System.Collections.Generic.List[Object]
-
 function Refresh-StepList {
+    # Prevent GUI flicker and hang during large list updates
+    $ListSteps.BeginUpdate()
     $ListSteps.Items.Clear()
-    foreach ($step in $MacroSteps) {
+    foreach ($step in $Global:MacroSteps) {
         $appTag = if ($step.WindowTitle) { "[$($step.WindowTitle)] " } else { "" }
         $displayText = if ($step.ActionType -eq "Click") { "${appTag}Click at ($($step.ScreenX), $($step.ScreenY)) - Waiting $($step.WaitTimeMS) ms" } elseif ($step.ActionType -eq "Scroll") { "${appTag}Scroll $($step.TextToType) - Waiting $($step.WaitTimeMS) ms" } else { "${appTag}Type '$($step.TextToType)' - Waiting $($step.WaitTimeMS) ms" }
         $ListSteps.Items.Add($displayText) | Out-Null
     }
+    $ListSteps.EndUpdate()
+    
     # Update visibility of buttons
-    if ($MacroSteps.Count -gt 0) {
+    if ($Global:MacroSteps.Count -gt 0) {
         $BtnAction.Text = "PLAY MACRO"
-        $BtnAction.BackColor = $colorSuccess
+        $BtnAction.BackColor = $Global:colorSuccess
         $BtnSave.Visible = $true
     } else {
         $BtnAction.Text = "RECORD SESSION (F8)"
-        $BtnAction.BackColor = $colorDanger
+        $BtnAction.BackColor = $Global:colorDanger
         $BtnSave.Visible = $false
     }
 }
@@ -559,7 +550,7 @@ function Add-MacroStep($action, $x, $y, $text, $delay, $image = "", $winTitle = 
         "AnchorImage" = $image
         "WindowTitle" = $winTitle
     }
-    $MacroSteps.Add($step)
+    $Global:MacroSteps.Add($step)
     Refresh-StepList
 }
 
@@ -572,7 +563,7 @@ function Start-Recording {
     $StatusLabel.Text = "RECORDING... (Press F8 to Stop)"
     Show-Notification "STARTING SEAMLESS RECORDING"
     
-    $MacroSteps.Clear()
+    $Global:MacroSteps.Clear()
     $ListSteps.Items.Clear()
     $BtnSave.Visible = $false
     
@@ -614,11 +605,12 @@ function Start-Recording {
         $isLeftDown = [TestingMacroStudioProWin32]::GetAsyncKeyState(0x01) -band 0x8000
         if ($isLeftDown -and -not $leftDown) {
             $pos = [Windows.Forms.Cursor]::Position
-            $img = ""; $win = Get-ActiveWindowTitle
-            if ($ChkUseVisual.Checked) {
-                $bmp = Get-ScreenSnippet $pos.X $pos.Y 60 60
-                $img = Image-ToBase64 $bmp; $bmp.Dispose()
-            }
+            $win = Get-ActiveWindowTitle
+            # Capture image for preview regardless of Master Toggle (Master Toggle only controls playback alignment)
+            # This ensures the user ALWAYS sees what they clicked.
+            $bmp = Get-ScreenSnippet $pos.X $pos.Y 60 60
+            $img = Image-ToBase64 $bmp; if($bmp){$bmp.Dispose()}
+            
             Add-MacroStep "Click" $pos.X $pos.Y "" $delta $img $win
             $lastTime = $currentTime
             Show-Notification "CLICK: $win"
@@ -662,7 +654,7 @@ function Start-Recording {
         [Windows.Forms.Application]::DoEvents()
     }
     $Form.WindowState = "Normal"
-    $StatusLabel.Text = "Recording Finished. Steps: $($MacroSteps.Count)"
+    $StatusLabel.Text = "Recording Finished. Steps: $($Global:MacroSteps.Count)"
     Show-Notification "RECORDING STOPPED"
 }
 
@@ -681,7 +673,7 @@ function Start-Playback {
         $StatusLabel.Text = "Playing Loop $($i + 1)..."
         
         $stepCount = 1
-        foreach ($step in $MacroSteps) {
+        foreach ($step in $Global:MacroSteps) {
             if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { $stopMacro = $true; break }
             $StatusLabel.Text = "Step ${stepCount}: $($step.ActionType) in $($step.WindowTitle)"
             
@@ -725,7 +717,7 @@ function Start-Playback {
                 [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             }
             elseif ($step.ActionType -eq "Type") {
-                # Browser Focus Fix: If typing, ensure we aren't replacing all text due to auto-selection
+                # Ensure correct window focus before typing
                 [System.Windows.Forms.SendKeys]::SendWait("{END}")
                 Start-Sleep -Milliseconds 50
                 [System.Windows.Forms.SendKeys]::SendWait($step.TextToType)
@@ -778,8 +770,7 @@ $BtnAddType.Add_Click({
     if ($input) { 
         $pos = [Windows.Forms.Cursor]::Position
         $bmp = Get-ScreenSnippet $pos.X $pos.Y 60 60
-        $img = Image-ToBase64 $bmp
-        $bmp.Dispose()
+        $img = Image-ToBase64 $bmp; if($bmp){$bmp.Dispose()}
         $win = Get-ActiveWindowTitle
         Add-MacroStep "Type" 0 0 $input 0 $img $win
     }
@@ -790,8 +781,7 @@ $BtnAddScroll.Add_Click({
     if ($input) { 
         $pos = [Windows.Forms.Cursor]::Position
         $bmp = Get-ScreenSnippet $pos.X $pos.Y 60 60
-        $img = Image-ToBase64 $bmp
-        $bmp.Dispose()
+        $img = Image-ToBase64 $bmp; if($bmp){$bmp.Dispose()}
         $win = Get-ActiveWindowTitle
         Add-MacroStep "Scroll" 0 0 $input 0 $img $win
     }
@@ -924,7 +914,7 @@ $BtnSave.Add_Click({
     $saveFile = New-Object Windows.Forms.SaveFileDialog
     $saveFile.Filter = "Macro files (*.json)|*.json"
     if ($saveFile.ShowDialog() -eq "OK") {
-        $MacroSteps | ConvertTo-Json -Depth 5 | Out-File $saveFile.FileName
+        $Global:MacroSteps | ConvertTo-Json -Depth 5 | Out-File $saveFile.FileName
         $StatusLabel.Text = "Macro Saved"
     }
 })
@@ -933,7 +923,7 @@ $BtnLoad.Add_Click({
     $loadFile = New-Object Windows.Forms.OpenFileDialog
     $loadFile.Filter = "Macro files (*.json)|*.json"
     if ($loadFile.ShowDialog() -eq "OK") {
-        $MacroSteps.Clear()
+        $Global:MacroSteps.Clear()
         $ListSteps.Items.Clear()
         $data = Get-Content $loadFile.FileName | ConvertFrom-Json
         foreach ($item in $data) {
@@ -943,7 +933,27 @@ $BtnLoad.Add_Click({
     }
 })
 
-# Optimize Launch with Performance Mode
+# --- Event Binding ---
+$ListSteps.Add_SelectedIndexChanged({
+    $idx = $ListSteps.SelectedIndex
+    if ($idx -ge 0 -and $idx -lt $Global:MacroSteps.Count) {
+        $step = $Global:MacroSteps[$idx]
+        if (-not [string]::IsNullOrEmpty($step.AnchorImage)) {
+            $bmp = Base64-ToImage $step.AnchorImage
+            if ($null -ne $bmp) {
+                $oldImg = $PicPreview.Image
+                $PicPreview.Image = $bmp
+                if ($oldImg) { $oldImg.Dispose() }
+            } else { $PicPreview.Image = $null }
+        } else {
+            $PicPreview.Image = $null
+        }
+        $PicPreview.Refresh()
+    }
+})
+
+# Launch
+Apply-Theme $Global:IsDarkMode
 [System.Windows.Forms.Application]::EnableVisualStyles()
 [Windows.Forms.Application]::Run($Form)
 }
