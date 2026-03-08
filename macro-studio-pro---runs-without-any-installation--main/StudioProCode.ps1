@@ -35,13 +35,13 @@ try {
 
 
 # --- Native Methods (Robust Definition) ---
-if (-not ("TestingMacroStudioProWin32" -as [type])) {
+if (-not ("StudioProWin32" -as [type])) {
     $NativeMethodsCode = @'
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
 
-public class TestingMacroStudioProWin32 {
+public class StudioProWin32 {
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int X, int Y);
 
@@ -85,7 +85,7 @@ public class TestingMacroStudioProWin32 {
 
 # --- GUI Construction ---
 $Form = New-Object Windows.Forms.Form
-$Form.Text = "Testing Macro Studio"
+$Form.Text = "Studio Pro Code"
 $Form.Size = New-Object Drawing.Size(750, 680)
 $Form.StartPosition = "CenterScreen"
 $Form.FormBorderStyle = "FixedDialog"

@@ -1,8 +1,8 @@
-# 🚀 Testing Macro Studio Pro
+# 🚀 Studio Pro Code
 
 **Advanced Productivity & Automation Suite** 
 
-Testing Macro Studio Pro is a professional-grade, portable automation tool designed for Windows. It allows users to simulate high-performance mouse, keyboard, and scroll interactions using a sleek, logical 3-column "Studio" layout.
+Studio Pro Code is a professional-grade, portable automation tool designed for Windows. It allows users to simulate high-performance mouse, keyboard, and scroll interactions using a sleek, logical 3-column "Studio" layout.
 
 Built entirely in PowerShell, it requires **zero dependencies** and **no administrative privileges**, making it the perfect solution for restricted corporate environments and developers looking for lightweight automation.
 
@@ -25,11 +25,11 @@ Built entirely in PowerShell, it requires **zero dependencies** and **no adminis
 
 ## 🚀 Getting Started
 
-1. **Download**: Clone this repository or download [TestingMacro.ps1](TestingMacro.ps1).
+1. **Download**: Clone this repository or download [StudioProCode.ps1](StudioProCode.ps1).
 
 ## 🚀 How to Run
 1.  **Download** the repository as a ZIP and extract it.
-2.  **Right-click** `TestingMacro.ps1` -> Properties -> Check **Unblock** -> OK (Required for Internet-downloaded scripts).
+2.  **Right-click** `StudioProCode.ps1` -> Properties -> Check **Unblock** -> OK (Required for Internet-downloaded scripts).
 3.  **Double-click `RunStudio.bat`** to start the application instantly.
 
 > [!TIP]
