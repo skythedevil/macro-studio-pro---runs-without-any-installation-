@@ -77,6 +77,9 @@ $Form.Font = $Font
 # --- Global Application State ---
 $Global:IsDarkMode = $true
 $Global:MacroSteps = New-Object System.Collections.Generic.List[Object]
+$Global:TypeBuffer = ""
+$Global:BufferTime = 0
+$Global:BufferWin = ""
 
 # Pre-initialize colors to avoid null during control creation
 $Global:colorBG = [Drawing.Color]::FromArgb(30,30,30)
@@ -149,6 +152,7 @@ function Apply-Theme {
     }
     $BtnAction.ForeColor = [Drawing.Color]::White
     $StatusStrip.BackColor = $Global:colorBG; $StatusLabel.ForeColor = $Global:colorAccent
+    $lblHUD.ForeColor = $Global:colorAccent
 }
 
 function Add-HoverEffect($btn, $type) {
@@ -405,6 +409,16 @@ $StatusLabel.Text = "Ready"
 $StatusStrip.Items.Add($StatusLabel) | Out-Null
 $Form.Controls.Add($StatusStrip)
 
+# --- Playback HUD Label ---
+$lblHUD = New-Object Windows.Forms.Label
+$lblHUD.Text = "No Macro Active"
+$lblHUD.Location = New-Object Drawing.Point(30, 620)
+$lblHUD.Size = New-Object Drawing.Size(690, 25)
+$lblHUD.ForeColor = [Drawing.Color]::Gray
+$lblHUD.Font = New-Object Drawing.Font("Segoe UI", 9, [Drawing.FontStyle]::Italic)
+$lblHUD.TextAlign = "MiddleCenter"
+$Form.Controls.Add($lblHUD)
+
 # Final Theme Application
 Apply-Theme $Global:IsDarkMode
 
@@ -602,12 +616,70 @@ function Start-Recording {
         $currentTime = Get-Date
         $delta = ($currentTime - $lastTime).TotalMilliseconds
         
+        # --- High-Speed Typing Buffer ---
+        $isAnyKeyDown = $false
+        foreach($vk in $keyMap.Keys) {
+            if ($vk -eq 0x01) { continue } # Handle Mouse Separately
+            $isDown = [TestingMacroStudioProWin32]::GetAsyncKeyState($vk) -band 0x8000
+            if ($isDown -and -not $keyDown[$vk]) {
+                $isAnyKeyDown = $true
+                $keyName = $keyMap[$vk]
+                
+                # Special Keys trigger immediate flush
+                $isSpecial = ($vk -eq 0x08 -or $vk -eq 0x0D -or $vk -eq 0x09 -or $vk -eq 0x1B -or $vk -eq 0x11 -or $vk -eq 0x12 -or $isPaused)
+                
+                if ($isSpecial) {
+                    # Flush buffer before special key
+                    if ($Global:TypeBuffer -ne "") {
+                        Add-MacroStep "Type" 0 0 $Global:TypeBuffer $Global:BufferTime "" $Global:BufferWin
+                        $Global:TypeBuffer = ""
+                    }
+                    
+                    $sendKey = switch($keyName) {
+                        "Back"     { "{BACKSPACE}" }; "Enter"    { "{ENTER}" }
+                        "Space"    { " " }; "Tab"      { "{TAB}" }
+                        "Escape"   { "{ESC}" }; "PageUp"   { "{PGUP}" }
+                        "PageDown" { "{PGDN}" }; "Up"       { "{UP}" }
+                        "Down"     { "{DOWN}" }; "Left"     { "{LEFT}" }
+                        "Right"    { "{RIGHT}" }
+                        Default    { $keyName.ToString().ToLower() }
+                    }
+                    
+                    $modifierPrefix = ""
+                    if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x11) -band 0x8000) { $modifierPrefix += "^" }
+                    if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x12) -band 0x8000) { $modifierPrefix += "%" }
+                    if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x10) -band 0x8000) { $modifierPrefix += "+" }
+                    
+                    $finalKey = $modifierPrefix + $sendKey
+                    Add-MacroStep "Type" 0 0 $finalKey $delta "" (Get-ActiveWindowTitle)
+                } else {
+                    # Append to buffer
+                    if ($Global:TypeBuffer -eq "") { 
+                        $Global:BufferTime = $delta 
+                        $Global:BufferWin = Get-ActiveWindowTitle
+                    }
+                    $char = switch($keyName) {
+                        "Space" { " " }
+                        Default { $keyName.ToString().ToLower() }
+                    }
+                    $Global:TypeBuffer += $char
+                }
+                $lastTime = $currentTime
+            }
+            $keyDown[$vk] = $isDown
+        }
+
+        # --- Mouse Capture ---
         $isLeftDown = [TestingMacroStudioProWin32]::GetAsyncKeyState(0x01) -band 0x8000
         if ($isLeftDown -and -not $leftDown) {
+            # Flush typing buffer on click
+            if ($Global:TypeBuffer -ne "") {
+                Add-MacroStep "Type" 0 0 $Global:TypeBuffer $Global:BufferTime "" $Global:BufferWin
+                $Global:TypeBuffer = ""
+            }
+            
             $pos = [Windows.Forms.Cursor]::Position
             $win = Get-ActiveWindowTitle
-            # Capture image for preview regardless of Master Toggle (Master Toggle only controls playback alignment)
-            # This ensures the user ALWAYS sees what they clicked.
             $bmp = Get-ScreenSnippet $pos.X $pos.Y 60 60
             $img = Image-ToBase64 $bmp; if($bmp){$bmp.Dispose()}
             
@@ -617,42 +689,17 @@ function Start-Recording {
         }
         $leftDown = $isLeftDown
 
-        $modifierPrefix = ""
-        if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x11) -band 0x8000) { $modifierPrefix += "^" }
-        if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x12) -band 0x8000) { $modifierPrefix += "%" }
-        if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x10) -band 0x8000) { $modifierPrefix += "+" }
-
-        foreach($vk in $keyMap.Keys) {
-            if ($vk -eq 0x10 -or $vk -eq 0x11 -or $vk -eq 0x12 -or $vk -eq 0x01) { continue }
-            $isDown = [TestingMacroStudioProWin32]::GetAsyncKeyState($vk) -band 0x8000
-            if($isDown -and -not $keyDown[$vk]) {
-                $keyName = $keyMap[$vk]
-                $sendKey = switch($keyName) {
-                    "Back"     { "{BACKSPACE}" }; "Enter"    { "{ENTER}" }
-                    "Space"    { " " }; "Tab"      { "{TAB}" }
-                    "Escape"   { "{ESC}" }; "PageUp"   { "{PGUP}" }
-                    "PageDown" { "{PGDN}" }; "Up"       { "{UP}" }
-                    "Down"     { "{DOWN}" }; "Left"     { "{LEFT}" }
-                    "Right"    { "{RIGHT}" }
-                    Default    { $keyName.ToString().ToLower() }
-                }
-                $finalKey = $modifierPrefix + $sendKey
-                $img = ""; $win = Get-ActiveWindowTitle
-                if ($ChkUseVisual.Checked) {
-                    $pos = [Windows.Forms.Cursor]::Position
-                    $bmp = Get-ScreenSnippet $pos.X $pos.Y 60 60
-                    $img = Image-ToBase64 $bmp; $bmp.Dispose()
-                }
-                Add-MacroStep "Type" 0 0 $finalKey $delta $img $win
-                $lastTime = $currentTime
-                Show-Notification "KEY: $finalKey ($win)"
-            }
-            $keyDown[$vk] = $isDown
-        }
-        # Optimized Polling to reduce CPU load and prevent hanging
-        Start-Sleep -Milliseconds 50
+        # Polling frequency boost for typing excellence
+        Start-Sleep -Milliseconds 15
         [Windows.Forms.Application]::DoEvents()
     }
+    
+    # Final Flush
+    if ($Global:TypeBuffer -ne "") {
+        Add-MacroStep "Type" 0 0 $Global:TypeBuffer $Global:BufferTime "" $Global:BufferWin
+        $Global:TypeBuffer = ""
+    }
+    
     $Form.WindowState = "Normal"
     $StatusLabel.Text = "Recording Finished. Steps: $($Global:MacroSteps.Count)"
     Show-Notification "RECORDING STOPPED"
@@ -675,6 +722,12 @@ function Start-Playback {
         $stepCount = 1
         foreach ($step in $Global:MacroSteps) {
             if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { $stopMacro = $true; break }
+            
+            $hudText = "NEXT: $($step.ActionType)"
+            if ($step.ActionType -eq "Type") { $hudText = "NEXT: Type '$($step.TextToType)'" }
+            if ($step.WindowTitle) { $hudText += " in $($step.WindowTitle)" }
+            $lblHUD.Text = $hudText; $lblHUD.Refresh()
+            
             $StatusLabel.Text = "Step ${stepCount}: $($step.ActionType) in $($step.WindowTitle)"
             
             # --- Smart Window Wait ---
