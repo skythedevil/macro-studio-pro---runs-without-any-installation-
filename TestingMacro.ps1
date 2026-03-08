@@ -52,12 +52,24 @@ public class TestingMacroStudioProWin32 {
     [DllImport("user32.dll")]
     public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+    
+    [DllImport("user32.dll")]
+    public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
     public const int MOUSEEVENTF_LEFTDOWN = 0x02;
     public const int MOUSEEVENTF_LEFTUP = 0x04;
     public const int MOUSEEVENTF_RIGHTDOWN = 0x08;
     public const int MOUSEEVENTF_RIGHTUP = 0x10;
     public const int KEYEVENTF_KEYUP = 0x0002;
     public const int MOUSEEVENTF_WHEEL = 0x0800;
+    public const int GWL_EXSTYLE = -20;
+    public const int WS_EX_LAYERED = 0x80000;
+    public const int WS_EX_TRANSPARENT = 0x20;
 }
 "@
 Add-Type -TypeDefinition $NativeMethodsCode
@@ -80,6 +92,34 @@ $Global:MacroSteps = New-Object System.Collections.Generic.List[Object]
 $Global:TypeBuffer = ""
 $Global:BufferTime = 0
 $Global:BufferWin = ""
+
+# --- Floating HUD for Playback ---
+$FloatingHUD = New-Object Windows.Forms.Form
+$FloatingHUD.FormBorderStyle = "None"
+$FloatingHUD.TopMost = $true
+$FloatingHUD.ShowInTaskbar = $false
+$FloatingHUD.BackColor = [Drawing.Color]::FromArgb(40, 40, 40)
+$FloatingHUD.Opacity = 0.8
+$FloatingHUD.Size = New-Object Drawing.Size(450, 45)
+$FloatingHUD.StartPosition = "Manual"
+$HUDLabel = New-Object Windows.Forms.Label
+$HUDLabel.ForeColor = [Drawing.Color]::White
+$HUDLabel.Dock = "Fill"
+$HUDLabel.TextAlign = "MiddleCenter"
+$HUDLabel.Font = New-Object Drawing.Font("Segoe UI", 11, [Drawing.FontStyle]::Bold)
+$FloatingHUD.Controls.Add($HUDLabel)
+
+# Position HUD at bottom
+$screenW = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width
+$screenH = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height
+$FloatingHUD.Location = New-Object Drawing.Point(($screenW/2 - 225), $screenH - 120)
+
+# Make HUD Click-Through
+$FloatingHUD.Add_Load({
+    $hWnd = $FloatingHUD.Handle
+    $exStyle = [TestingMacroStudioProWin32]::GetWindowLong($hWnd, -20)
+    [TestingMacroStudioProWin32]::SetWindowLong($hWnd, -20, $exStyle -bor 0x80000 -bor 0x20) | Out-Null
+})
 
 # Pre-initialize colors to avoid null during control creation
 $Global:colorBG = [Drawing.Color]::FromArgb(30,30,30)
@@ -463,7 +503,7 @@ function Get-ActiveWindowTitle() {
 }
 
 # --- Visual Alignment Engine ---
-function Get-ScreenSnippet($x, $y, $w, $h) {
+function Get-ScreenSnippet($x, $y, $w = 50, $h = 50) {
     try {
         $bmp = New-Object Drawing.Bitmap($w, $h)
         $graphics = [Drawing.Graphics]::FromImage($bmp)
@@ -491,10 +531,12 @@ function Base64-ToImage($base64) {
         $bytes = [Convert]::FromBase64String($base64)
         $ms = New-Object System.IO.MemoryStream($bytes)
         $img = [Drawing.Image]::FromStream($ms)
-        # Deep clone pixels to a new bitmap to avoid stream dependency and disposal bugs
+        # Force a clone into a new bitmap to guarantee stream independence
         $bmp = New-Object Drawing.Bitmap($img.Width, $img.Height)
         $g = [Drawing.Graphics]::FromImage($bmp)
-        $g.DrawImage($img, 0, 0)
+        $g.SmoothingMode = "HighQuality"
+        $g.InterpolationMode = "HighQualityBicubic"
+        $g.DrawImage($img, 0, 0, $img.Width, $img.Height)
         $g.Dispose()
         $img.Dispose()
         $ms.Dispose()
@@ -626,12 +668,17 @@ function Start-Recording {
                 $keyName = $keyMap[$vk]
                 
                 # Special Keys trigger immediate flush
-                $isSpecial = ($vk -eq 0x08 -or $vk -eq 0x0D -or $vk -eq 0x09 -or $vk -eq 0x1B -or $vk -eq 0x11 -or $vk -eq 0x12 -or $isPaused)
+                # Arrows (0x25-0x28) are now special to avoid being typed as strings
+                $isSpecial = ($vk -eq 0x08 -or $vk -eq 0x0D -or $vk -eq 0x09 -or $vk -eq 0x1B -or $vk -eq 0x11 -or $vk -eq 0x12 -or ($vk -ge 0x25 -and $vk -le 0x28) -or $isPaused)
                 
                 if ($isSpecial) {
                     # Flush buffer before special key
                     if ($Global:TypeBuffer -ne "") {
-                        Add-MacroStep "Type" 0 0 $Global:TypeBuffer $Global:BufferTime "" $Global:BufferWin
+                        # Capture image where mouse is when typing finishes (or starts)
+                        $pos = [Windows.Forms.Cursor]::Position
+                        $bmp = Get-ScreenSnippet $pos.X $pos.Y
+                        $img = Image-ToBase64 $bmp; if($bmp){$bmp.Dispose()}
+                        Add-MacroStep "Type" 0 0 $Global:TypeBuffer $Global:BufferTime $img $Global:BufferWin
                         $Global:TypeBuffer = ""
                     }
                     
@@ -657,6 +704,7 @@ function Start-Recording {
                     if ($Global:TypeBuffer -eq "") { 
                         $Global:BufferTime = $delta 
                         $Global:BufferWin = Get-ActiveWindowTitle
+                        # We could capture image here, but let's do it at flush for simplicity
                     }
                     $char = switch($keyName) {
                         "Space" { " " }
@@ -674,13 +722,16 @@ function Start-Recording {
         if ($isLeftDown -and -not $leftDown) {
             # Flush typing buffer on click
             if ($Global:TypeBuffer -ne "") {
-                Add-MacroStep "Type" 0 0 $Global:TypeBuffer $Global:BufferTime "" $Global:BufferWin
+                $pos_m = [Windows.Forms.Cursor]::Position
+                $bmp_m = Get-ScreenSnippet $pos_m.X $pos_m.Y
+                $img_m = Image-ToBase64 $bmp_m; if($bmp_m){$bmp_m.Dispose()}
+                Add-MacroStep "Type" 0 0 $Global:TypeBuffer $Global:BufferTime $img_m $Global:BufferWin
                 $Global:TypeBuffer = ""
             }
             
             $pos = [Windows.Forms.Cursor]::Position
             $win = Get-ActiveWindowTitle
-            $bmp = Get-ScreenSnippet $pos.X $pos.Y 60 60
+            $bmp = Get-ScreenSnippet $pos.X $pos.Y
             $img = Image-ToBase64 $bmp; if($bmp){$bmp.Dispose()}
             
             Add-MacroStep "Click" $pos.X $pos.Y "" $delta $img $win
@@ -696,7 +747,10 @@ function Start-Recording {
     
     # Final Flush
     if ($Global:TypeBuffer -ne "") {
-        Add-MacroStep "Type" 0 0 $Global:TypeBuffer $Global:BufferTime "" $Global:BufferWin
+        $pos_f = [Windows.Forms.Cursor]::Position
+        $bmp_f = Get-ScreenSnippet $pos_f.X $pos_f.Y
+        $img_f = Image-ToBase64 $bmp_f; if($bmp_f){$bmp_f.Dispose()}
+        Add-MacroStep "Type" 0 0 $Global:TypeBuffer $Global:BufferTime $img_f $Global:BufferWin
         $Global:TypeBuffer = ""
     }
     
@@ -711,6 +765,9 @@ function Start-Playback {
     $speed = $SliderSpeed.Value / 10.0
     if ($speed -le 0) { $speed = 1.0 }
     
+    $HUDLabel.Text = "INITIALIZING MACRO..."
+    $FloatingHUD.Show()
+    
     $Form.WindowState = "Minimized"
     Start-Sleep -Seconds 2
     
@@ -723,10 +780,11 @@ function Start-Playback {
         foreach ($step in $Global:MacroSteps) {
             if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { $stopMacro = $true; break }
             
-            $hudText = "NEXT: $($step.ActionType)"
-            if ($step.ActionType -eq "Type") { $hudText = "NEXT: Type '$($step.TextToType)'" }
+            $hudText = "ACTION ($stepCount): $($step.ActionType)"
+            if ($step.ActionType -eq "Type") { $hudText = "TYPE: '$($step.TextToType)'" }
             if ($step.WindowTitle) { $hudText += " in $($step.WindowTitle)" }
             $lblHUD.Text = $hudText; $lblHUD.Refresh()
+            $HUDLabel.Text = $hudText; $FloatingHUD.Refresh()
             
             $StatusLabel.Text = "Step ${stepCount}: $($step.ActionType) in $($step.WindowTitle)"
             
@@ -740,7 +798,12 @@ function Start-Playback {
                 while ($waitedForWin -lt 6000) { 
                     $currentWin = Get-ActiveWindowTitle
                     # Robust check: Exact match OR partial match for common parts
-                    if ($currentWin -eq $targetWin -or $currentWin -match [regex]::Escape($matchPattern)) { break }
+                    if ($currentWin -eq $targetWin -or $currentWin -match [regex]::Escape($matchPattern)) { 
+                        # Force foreground strictly as requested
+                        $hWnd = [TestingMacroStudioProWin32]::GetForegroundWindow()
+                        [TestingMacroStudioProWin32]::SetForegroundWindow($hWnd) | Out-Null
+                        break 
+                    }
                     
                     $StatusLabel.Text = "WAITING FOR: $targetWin ($waitedForWin ms)"
                     if ([TestingMacroStudioProWin32]::GetAsyncKeyState(0x77) -band 0x8000) { $stopMacro = $true; break }
@@ -758,8 +821,9 @@ function Start-Playback {
                         $searchArea = Get-ScreenSnippet $targetX $targetY 100 100
                         $matchPos = Find-ImageSnippet $searchArea $anchor
                         if ($null -ne $matchPos) {
-                            $targetX = ($targetX - 50) + $matchPos.X + 30
-                            $targetY = ($targetY - 50) + $matchPos.Y + 30
+                            # Adjust to center of matched anchor (50x50)
+                            $targetX = ($targetX - 50) + $matchPos.X + 25
+                            $targetY = ($targetY - 50) + $matchPos.Y + 25
                         }
                         $anchor.Dispose(); $searchArea.Dispose()
                     }
