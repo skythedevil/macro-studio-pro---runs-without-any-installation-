@@ -857,24 +857,100 @@ $BtnRemove.Add_Click({
     }
 })
 
+function Show-StepEditor($idx) {
+    if ($idx -lt 0 -or $idx -ge $Global:MacroSteps.Count) { return }
+    $step = $Global:MacroSteps[$idx]
+
+    $EditForm = New-Object Windows.Forms.Form
+    $EditForm.Text = "Edit Macro Step"
+    $EditForm.Size = New-Object Drawing.Size(450, 280)
+    $EditForm.BackColor = $Global:colorBG
+    $EditForm.ForeColor = $Global:colorFG
+    $EditForm.StartPosition = "CenterParent"
+    $EditForm.FormBorderStyle = "FixedDialog"
+    $EditForm.MaximizeBox = $false
+
+    $LabelTitle = New-Object Windows.Forms.Label
+    $LabelTitle.Text = "EDIT STEP: $($step.ActionType)"
+    $LabelTitle.Font = $BoldFont
+    $LabelTitle.ForeColor = $Global:colorAccent
+    $LabelTitle.Location = New-Object Drawing.Point(20, 20)
+    $LabelTitle.AutoSize = $true
+    $EditForm.Controls.Add($LabelTitle)
+
+    # Primary Input
+    $LabelVal = New-Object Windows.Forms.Label
+    $LabelVal.Text = if ($step.ActionType -eq "Click") { "Click Metadata (Intent):" } else { "Text / Units to Send:" }
+    $LabelVal.Location = New-Object Drawing.Point(20, 55)
+    $LabelVal.AutoSize = $true
+    $EditForm.Controls.Add($LabelVal)
+
+    $TxtVal = New-Object Windows.Forms.TextBox
+    $TxtVal.Text = if ($step.ActionType -eq "Click") { $step.Instructions } else { $step.TextToType }
+    $TxtVal.Location = New-Object Drawing.Point(20, 80)
+    $TxtVal.Size = New-Object Drawing.Size(390, 30)
+    $TxtVal.BackColor = $Global:colorPanel
+    $TxtVal.ForeColor = $Global:colorFG
+    $TxtVal.BorderStyle = "FixedSingle"
+    $EditForm.Controls.Add($TxtVal)
+
+    # Delay Input
+    $LabelDelay = New-Object Windows.Forms.Label
+    $LabelDelay.Text = "Wait Time / Delay (ms):"
+    $LabelDelay.Location = New-Object Drawing.Point(20, 125)
+    $LabelDelay.AutoSize = $true
+    $EditForm.Controls.Add($LabelDelay)
+
+    $TxtWait = New-Object Windows.Forms.TextBox
+    $TxtWait.Text = $step.WaitTimeMS.ToString()
+    $TxtWait.Location = New-Object Drawing.Point(20, 150)
+    $TxtWait.Size = New-Object Drawing.Size(150, 30)
+    $TxtWait.BackColor = $Global:colorPanel
+    $TxtWait.ForeColor = $Global:colorFG
+    $TxtWait.BorderStyle = "FixedSingle"
+    $EditForm.Controls.Add($TxtWait)
+
+    # Buttons
+    $BtnOk = New-Object Windows.Forms.Button
+    $BtnOk.Text = "SAVE CHANGES"
+    $BtnOk.Location = New-Object Drawing.Point(20, 195)
+    $BtnOk.Size = New-Object Drawing.Size(180, 40)
+    $BtnOk.BackColor = $Global:colorSuccess
+    $BtnOk.ForeColor = [Drawing.Color]::White
+    $BtnOk.FlatStyle = "Flat"; $BtnOk.FlatAppearance.BorderSize = 0
+    $BtnOk.Add_Click({
+        if ($step.ActionType -eq "Click") {
+            $step.Instructions = $TxtVal.Text
+        } else {
+            $step.TextToType = $TxtVal.Text
+        }
+        if ($TxtWait.Text -as [int]) {
+            $step.WaitTimeMS = [int]$TxtWait.Text
+        }
+        $EditForm.Tag = "OK"
+        $EditForm.Close()
+    })
+    $EditForm.Controls.Add($BtnOk)
+
+    $BtnCancel = New-Object Windows.Forms.Button
+    $BtnCancel.Text = "CANCEL"
+    $BtnCancel.Location = New-Object Drawing.Point(230, 195)
+    $BtnCancel.Size = New-Object Drawing.Size(180, 40)
+    $BtnCancel.BackColor = $Global:colorBtnGray
+    $BtnCancel.ForeColor = $Global:colorFG
+    $BtnCancel.FlatStyle = "Flat"; $BtnCancel.FlatAppearance.BorderSize = 0
+    $BtnCancel.Add_Click({ $EditForm.Close() })
+    $EditForm.Controls.Add($BtnCancel)
+
+    $EditForm.ShowDialog()
+    return $EditForm.Tag
+}
+
 $BtnEdit.Add_Click({
     $idx = $ListSteps.SelectedIndex
     if ($idx -ge 0) {
-        $step = $MacroSteps[$idx]
-        $prompt = if ($step.ActionType -eq "Type") { "Edit Text to Type:" } elseif ($step.ActionType -eq "Scroll") { "Edit Scroll Units:" } else { "Edit Intent (Click metadata):" }
-        $default = if ($step.ActionType -eq "Type" -or $step.ActionType -eq "Scroll") { $step.TextToType } else { $step.Instructions }
-        
-        $newVal = [Microsoft.VisualBasic.Interaction]::InputBox($prompt, "Edit Step", $default)
-        if ($newVal) {
-            # Update values
-            if ($step.ActionType -eq "Type" -or $step.ActionType -eq "Scroll") {
-                $step.TextToType = $newVal
-            }
-            # Also allow editing Wait Time
-            $newWait = [Microsoft.VisualBasic.Interaction]::InputBox("Edit Wait Time (ms):", "Edit Delay", $step.WaitTimeMS.ToString())
-            if ($newWait -as [int]) {
-                $step.WaitTimeMS = [int]$newWait
-            }
+        $res = Show-StepEditor $idx
+        if ($res -eq "OK") {
             Refresh-StepList
             $StatusLabel.Text = "Step Updated"
         }
