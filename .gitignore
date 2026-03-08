@@ -1,0 +1,9 @@
+# PowerShell Logs
+*_error_log.txt
+
+# Windows temporary files
+Thumbs.db
+Desktop.ini
+
+# Macro data samples (optional, user might want to keep their templates)
+# *.json
