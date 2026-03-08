@@ -587,7 +587,7 @@ function Refresh-StepList {
     $count = 1
     foreach ($step in $Global:MacroSteps) {
         $appTag = if ($step.WindowTitle) { "[$($step.WindowTitle)] " } else { "" }
-        $displayText = if ($step.ActionType -eq "Click") { "Step $count: ${appTag}Click at ($($step.ScreenX), $($step.ScreenY)) - Waiting $($step.WaitTimeMS) ms" } elseif ($step.ActionType -eq "Scroll") { "Step $count: ${appTag}Scroll $($step.TextToType) - Waiting $($step.WaitTimeMS) ms" } else { "Step $count: ${appTag}Type '$($step.TextToType)' - Waiting $($step.WaitTimeMS) ms" }
+        $displayText = if ($step.ActionType -eq "Click") { "Step ${count}: ${appTag}Click at ($($step.ScreenX), $($step.ScreenY)) - Waiting $($step.WaitTimeMS) ms" } elseif ($step.ActionType -eq "Scroll") { "Step ${count}: ${appTag}Scroll $($step.TextToType) - Waiting $($step.WaitTimeMS) ms" } else { "Step ${count}: ${appTag}Type '$($step.TextToType)' - Waiting $($step.WaitTimeMS) ms" }
         $ListSteps.Items.Add($displayText) | Out-Null
         $count++
     }
