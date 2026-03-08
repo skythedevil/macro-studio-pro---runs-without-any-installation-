@@ -109,10 +109,14 @@ $HUDLabel.TextAlign = "MiddleCenter"
 $HUDLabel.Font = New-Object Drawing.Font("Segoe UI", 11, [Drawing.FontStyle]::Bold)
 $FloatingHUD.Controls.Add($HUDLabel)
 
-# Position HUD at bottom
-$screenW = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width
-$screenH = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height
-$FloatingHUD.Location = New-Object Drawing.Point(($screenW/2 - 225), $screenH - 120)
+# Position HUD at bottom (Robust detection)
+$primaryScreen = [System.Windows.Forms.Screen]::PrimaryScreen
+if ($null -eq $primaryScreen) { $primaryScreen = [System.Windows.Forms.Screen]::AllScreens[0] }
+$screenW = [int]$primaryScreen.Bounds.Width
+$screenH = [int]$primaryScreen.Bounds.Height
+$HUDPosX = [int]($screenW / 2 - 225)
+$HUDPosY = [int]($screenH - 120)
+$FloatingHUD.Location = New-Object Drawing.Point($HUDPosX, $HUDPosY)
 
 # Make HUD Click-Through
 $FloatingHUD.Add_Load({
