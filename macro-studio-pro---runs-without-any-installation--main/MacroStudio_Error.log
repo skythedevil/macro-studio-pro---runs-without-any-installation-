@@ -1,0 +1,5 @@
+﻿
+[2026-03-08 16:08:04] SCRIPT ERROR:
+Method invocation failed because [System.Reflection.Assembly] does not contain a method named 'GetAssemblies'.
+at <ScriptBlock>, D:\doer\macro-studio-pro---runs-without-any-installation--main\TestingMacro.ps1: line 8
+==================================================

@@ -5,7 +5,7 @@ try {
     # Robust Assembly Loading
     $assemblies = @("System.Windows.Forms", "System.Drawing", "Microsoft.VisualBasic")
     foreach ($asm in $assemblies) {
-        if (-not ([System.Reflection.Assembly]::GetAssemblies() | Where-Object { $_.FullName -like "$asm*" })) {
+        if (-not ([System.AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.FullName -like "$asm*" })) {
             try { Add-Type -AssemblyName $asm } catch { }
         }
     }
