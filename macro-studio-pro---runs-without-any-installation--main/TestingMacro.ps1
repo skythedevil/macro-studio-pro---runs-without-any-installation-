@@ -586,8 +586,17 @@ function Refresh-StepList {
     $ListSteps.Items.Clear()
     $count = 1
     foreach ($step in $Global:MacroSteps) {
+        if ($step.ActionType -eq "Move") { continue } # Skip background moves for clean UI
         $appTag = if ($step.WindowTitle) { "[$($step.WindowTitle)] " } else { "" }
-        $displayText = if ($step.ActionType -eq "Click") { "Step ${count}: ${appTag}Click at ($($step.ScreenX), $($step.ScreenY)) - Waiting $($step.WaitTimeMS) ms" } elseif ($step.ActionType -eq "Scroll") { "Step ${count}: ${appTag}Scroll $($step.TextToType) - Waiting $($step.WaitTimeMS) ms" } else { "Step ${count}: ${appTag}Type '$($step.TextToType)' - Waiting $($step.WaitTimeMS) ms" }
+        $displayText = switch($step.ActionType) {
+            "Click"       { "Step ${count}: ${appTag}Click at ($($step.ScreenX), $($step.ScreenY))" }
+            "RightClick"  { "Step ${count}: ${appTag}Right-Click at ($($step.ScreenX), $($step.ScreenY))" }
+            "DoubleClick" { "Step ${count}: ${appTag}Double-Click at ($($step.ScreenX), $($step.ScreenY))" }
+            "Scroll"      { "Step ${count}: ${appTag}Scroll $($step.TextToType)" }
+            "Type"        { "Step ${count}: ${appTag}Type '$($step.TextToType)'" }
+            Default       { "Step ${count}: ${appTag}Action: $($step.ActionType)" }
+        }
+        $displayText += " - Wait $($step.WaitTimeMS) ms"
         $ListSteps.Items.Add($displayText) | Out-Null
         $count++
     }
@@ -608,10 +617,13 @@ function Refresh-StepList {
 function Add-MacroStep($action, $x, $y, $text, $delay, $image = "", $winTitle = "") {
     $step = [PSCustomObject]@{
         "Instructions" = switch($action) {
-            "Click"  { "Move mouse to $x, $y and Left Click" }
-            "Type"   { "Type the message: '$text'" }
-            "Scroll" { "Scroll mouse wheel by $text units" }
-            Default  { "Action: $action" }
+            "Click"       { "Move mouse to $x, $y and Left Click" }
+            "RightClick"  { "Move mouse to $x, $y and Right Click" }
+            "DoubleClick" { "Move mouse to $x, $y and Double Click" }
+            "Move"        { "Move mouse to $x, $y" }
+            "Type"        { "Type the message: '$text'" }
+            "Scroll"      { "Scroll mouse wheel by $text units" }
+            Default       { "Action: $action" }
         }
         "ActionType" = $action
         "ScreenX" = $x
@@ -640,6 +652,10 @@ function Start-Recording {
     
     $lastTime = Get-Date
     $leftDown = $false
+    $rightDown = $false
+    $lastClickTime = 0
+    $lastClickPos = [Drawing.Point]::Empty
+    $lastMousePos = [Windows.Forms.Cursor]::Position
     $keyDown = @{} 
     
     $keyMap = @{
@@ -733,29 +749,60 @@ function Start-Recording {
         }
 
         # --- Mouse Capture ---
+        $pos = [Windows.Forms.Cursor]::Position
+        
+        # 1. Capture Movement (Throttled Move)
+        if ($pos.X -ne $lastMousePos.X -or $pos.Y -ne $lastMousePos.Y) {
+            Add-MacroStep "Move" $pos.X $pos.Y "" $delta "" ""
+            $lastMousePos = $pos
+            $lastTime = $currentTime
+            $delta = 0 # Reset delta for immediately following action
+        }
+
+        # 2. Left Click (with Double Click Logic)
         $isLeftDown = [TestingMacroStudioProWin32]::GetAsyncKeyState(0x01) -band 0x8000
         if ($isLeftDown -and -not $leftDown) {
-            # Flush typing buffer on click
             if ($Global:TypeBuffer -ne "") {
-                $pos_m = [Windows.Forms.Cursor]::Position
-                $bmp_m = Get-ScreenSnippet $pos_m.X $pos_m.Y
-                $img_m = Image-ToBase64 $bmp_m; if($bmp_m){$bmp_m.Dispose()}
+                $bmp_m = Get-ScreenSnippet $pos.X $pos.Y; $img_m = Image-ToBase64 $bmp_m; if($bmp_m){$bmp_m.Dispose()}
                 Add-MacroStep "Type" 0 0 $Global:TypeBuffer $Global:BufferTime $img_m $Global:BufferWin
                 $Global:TypeBuffer = ""
             }
             
-            $pos = [Windows.Forms.Cursor]::Position
-            $win = Get-ActiveWindowTitle
-            $bmp = Get-ScreenSnippet $pos.X $pos.Y
-            $img = Image-ToBase64 $bmp; if($bmp){$bmp.Dispose()}
+            $currentTimeMS = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
+            $isDoubleClick = ($currentTimeMS - $lastClickTime -lt 400) -and ([Math]::Abs($pos.X - $lastClickPos.X) -lt 5) -and ([Math]::Abs($pos.Y - $lastClickPos.Y) -lt 5)
             
-            Add-MacroStep "Click" $pos.X $pos.Y "" $delta $img $win
-            $lastTime = $currentTime
-            Show-Notification "CLICK: $win"
+            if ($isDoubleClick -and $Global:MacroSteps.Count -gt 0) {
+                # Convert previous single click to double click
+                $prev = $Global:MacroSteps[$Global:MacroSteps.Count - 1]
+                if ($prev.ActionType -eq "Click") {
+                    $prev.ActionType = "DoubleClick"
+                    $prev.Instructions = "Move mouse to $($pos.X), $($pos.Y) and Double Click"
+                    Refresh-StepList
+                } else {
+                    Add-MacroStep "DoubleClick" $pos.X $pos.Y "" $delta "" (Get-ActiveWindowTitle)
+                }
+            } else {
+                $bmp = Get-ScreenSnippet $pos.X $pos.Y; $img = Image-ToBase64 $bmp; if($bmp){$bmp.Dispose()}
+                Add-MacroStep "Click" $pos.X $pos.Y "" $delta $img (Get-ActiveWindowTitle)
+            }
+            
+            $lastClickTime = $currentTimeMS
+            $lastClickPos = $pos
+            $lastTime = Get-Date
+            Show-Notification "CLICK DETECTED"
         }
         $leftDown = $isLeftDown
 
-        # Polling frequency boost for typing excellence
+        # 3. Right Click
+        $isRightDown = [TestingMacroStudioProWin32]::GetAsyncKeyState(0x02) -band 0x8000
+        if ($isRightDown -and -not $rightDown) {
+            $bmp = Get-ScreenSnippet $pos.X $pos.Y; $img = Image-ToBase64 $bmp; if($bmp){$bmp.Dispose()}
+            Add-MacroStep "RightClick" $pos.X $pos.Y "" $delta $img (Get-ActiveWindowTitle)
+            $lastTime = Get-Date
+            Show-Notification "RIGHT CLICK"
+        }
+        $rightDown = $isRightDown
+
         Start-Sleep -Milliseconds 15
         [Windows.Forms.Application]::DoEvents()
     }
@@ -836,7 +883,6 @@ function Start-Playback {
                         $searchArea = Get-ScreenSnippet $targetX $targetY 100 100
                         $matchPos = Find-ImageSnippet $searchArea $anchor
                         if ($null -ne $matchPos) {
-                            # Adjust to center of matched anchor (50x50)
                             $targetX = ($targetX - 50) + $matchPos.X + 25
                             $targetY = ($targetY - 50) + $matchPos.Y + 25
                         }
@@ -848,10 +894,30 @@ function Start-Playback {
                 [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
                 [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             }
-            elseif ($step.ActionType -eq "Type") {
-                # Ensure correct window focus before typing
-                [System.Windows.Forms.SendKeys]::SendWait("{END}")
+            elseif ($step.ActionType -eq "RightClick") {
+                [TestingMacroStudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
+                Start-Sleep -Milliseconds 100
+                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+            }
+            elseif ($step.ActionType -eq "DoubleClick") {
+                [TestingMacroStudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
+                Start-Sleep -Milliseconds 100
+                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
                 Start-Sleep -Milliseconds 50
+                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                [TestingMacroStudioProWin32]::mouse_event([TestingMacroStudioProWin32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            }
+            elseif ($step.ActionType -eq "Move") {
+                [TestingMacroStudioProWin32]::SetCursorPos($step.ScreenX, $step.ScreenY)
+            }
+            elseif ($step.ActionType -eq "Type") {
+                # Excel Fix: Ensure fresh modifier state for navigation keys
+                if ($step.TextToType -match "{(LEFT|RIGHT|UP|DOWN)}") {
+                    [TestingMacroStudioProWin32]::keybd_event(0x11, 0, 0x0002, 0) # Ctrl Up
+                    [TestingMacroStudioProWin32]::keybd_event(0x10, 0, 0x0002, 0) # Shift Up
+                }
                 [System.Windows.Forms.SendKeys]::SendWait($step.TextToType)
             }
             elseif ($step.ActionType -eq "Scroll") {
